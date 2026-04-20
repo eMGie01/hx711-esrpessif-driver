@@ -110,7 +110,6 @@ hx711_init_with_isr(hx711_t * dev, hx711_hw_t * gpios, const hx711_set_t * setti
     dev->last_raw = 0;
     atomic_init(&dev->data_ready, false);
     portMUX_INITIALIZE(&dev->mux);
-    dev->data_ready = false;
 
     // we have to ensure, that the gpio_isr_serrvice is installed
     esp_err_t res = gpio_install_isr_service(0);
@@ -126,6 +125,13 @@ hx711_init_with_isr(hx711_t * dev, hx711_hw_t * gpios, const hx711_set_t * setti
     
     if ( ESP_OK != gpio_set_intr_type((gpio_num_t)dev->ios.io_dout, GPIO_INTR_NEGEDGE) )
     {
+        gpio_isr_handler_remove((gpio_num_t)dev->ios.io_dout);
+        return HX711_ISR_ERR;
+    }
+
+    if ( ESP_OK != gpio_intr_enable((gpio_num_t)dev->ios.io_dout) )
+    {
+        gpio_isr_handler_remove((gpio_num_t)dev->ios.io_dout);
         return HX711_ISR_ERR;
     }
 

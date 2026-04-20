@@ -137,8 +137,8 @@ hx711_read_raw_with_timeout(hx711_t * dev, int32_t * value)
         return read_raw_(dev, value);
     }
 
-    TickType_t checkpoint = xTaskGetTickCount();
-    while ( (TickType_t)dev->settings.timeout_ms > pdTICKS_TO_MS( xTaskGetTickCount() - checkpoint) )
+    uint64_t deadline_ms = esp_timer_get_time() + 1000 * (uint64_t)dev->settings.timeout_ms;
+    while ( esp_timer_get_time() - deadline_ms )
     {
 
         if ( HX711_OK != hx711_is_ready(dev) )
@@ -181,8 +181,8 @@ hx711_read_raw_isr(hx711_t * dev, int32_t * value)
         }
     }
 
-    TickType_t checkpoint = xTaskGetTickCount();
-    while ( (TickType_t)dev->settings.timeout_ms >= pdTICKS_TO_MS( xTaskGetTickCount() - checkpoint) )
+    uint64_t deadline_ms = esp_timer_get_time() + 1000 * (uint64_t)dev->settings.timeout_ms;
+    while ( esp_timer_get_time() < deadline_ms )
     {
 
         if ( !atomic_load_explicit(&dev->data_ready, memory_order_acquire) )
