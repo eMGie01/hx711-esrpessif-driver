@@ -198,10 +198,7 @@ hx711_deinit(hx711_t * dev)
         dev->isr_installed = false;
     }
 
-    dev->settings = (hx711_set_t) {
-        .mode = 0,
-        .timeout_ms = 0
-    };
+    dev->settings = (hx711_set_t) {0, 0};
     dev->last_raw = 0;
     dev->initialized = false;
 
