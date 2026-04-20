@@ -181,8 +181,8 @@ hx711_read_raw_isr(hx711_t * dev, int32_t * value)
         }
     }
 
-    uint64_t deadline_ms = esp_timer_get_time() + 1000 * (uint64_t)dev->settings.timeout_ms;
-    while ( esp_timer_get_time() < deadline_ms )
+    uint64_t deadline_us = esp_timer_get_time() + 1000 * (uint64_t)dev->settings.timeout_ms;
+    while ( esp_timer_get_time() < deadline_us )
     {
 
         if ( !atomic_load_explicit(&dev->data_ready, memory_order_acquire) )
