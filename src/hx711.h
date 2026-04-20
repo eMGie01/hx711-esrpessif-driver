@@ -1,5 +1,5 @@
-#ifndef _HX711_H
-#define _HX711_H
+#ifndef HX711_H
+#define HX711_H
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -50,12 +50,6 @@ typedef struct
     uint32_t     timeout_ms;
 } hx711_set_t;
 
-typedef struct
-{
-    // int32_t scale;
-    int32_t offset;
-} hx711_cal_t;
-
 typedef struct 
 {
     atomic_bool data_ready;
@@ -84,4 +78,4 @@ hx711_status_t hx711_read_raw_isr(hx711_t * dev, int32_t * value);
 }
 #endif
 
-#endif // _HX711_H
+#endif // HX711_H
