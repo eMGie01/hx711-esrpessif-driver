@@ -52,16 +52,15 @@ typedef struct
 
 typedef struct
 {
-    int32_t scale;
+    // int32_t scale;
     int32_t offset;
 } hx711_cal_t;
 
 typedef struct 
 {
-    volatile bool data_ready;
+    atomic_bool data_ready;
     hx711_hw_t    ios;
     hx711_set_t   settings;
-    hx711_cal_t   calib;
     int32_t       last_raw;
     bool          initialized;
     bool          isr_installed;
@@ -79,11 +78,6 @@ hx711_status_t hx711_is_ready(const hx711_t * dev);
 hx711_status_t hx711_read_raw(hx711_t * dev, int32_t * value);
 hx711_status_t hx711_read_raw_with_timeout(hx711_t * dev, int32_t * value);
 hx711_status_t hx711_read_raw_isr(hx711_t * dev, int32_t * value);
-
-hx711_status_t hx711_set_offset_raw(hx711_t * dev, const int32_t offset);
-hx711_status_t hx711_get_offset_raw(const hx711_t * dev, int32_t * value);
-hx711_status_t hx711_set_scale_raw(hx711_t * dev, const int32_t scale);
-hx711_status_t hx711_get_scale_raw(const hx711_t * dev, int32_t * value);
 
 
 #ifdef __cplusplus

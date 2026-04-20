@@ -1,53 +1,40 @@
 #include "hx711.h"
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+
 #include "esp_rom_sys.h"
+#include "esp_timer.h"
 #include "esp_err.h"
-#include "esp_log.h"
 
 
 #define ADC_BIT_COUNT 24
 
 
-static hx711_status_t 
+static hx711_status_t IRAM_ATTR
 read_raw_(hx711_t * dev, int32_t * value)
 {
     uint32_t raw_adc_value = 0;
-
-    dev->data_ready = 0;
+    atomic_store_explicit(&dev->data_ready, false, memory_order_relaxed);
+    
+    portENTER_CRITICAL(&dev->mux);
 
     for (uint8_t i = 0; i < ADC_BIT_COUNT; ++i)
     {
-
-        if (ESP_OK != gpio_set_level(dev->ios.io_sck, 1) )
-        {
-            return HX711_HW_ERR;
-        }
+        gpio_set_level(dev->ios.io_sck, 1);
         esp_rom_delay_us(1);
-
         raw_adc_value = (raw_adc_value << 1) | gpio_get_level(dev->ios.io_dout);
-        
-        if (ESP_OK != gpio_set_level(dev->ios.io_sck, 0) )
-        {
-            return HX711_HW_ERR;
-        }
+        gpio_set_level(dev->ios.io_sck, 0);
         esp_rom_delay_us(1);
-
     }
 
     for (uint8_t i = 0; i < ((uint8_t)dev->settings.mode - ADC_BIT_COUNT); ++i)
     {
-        for (uint8_t j = 0; j < 2; ++j)
-        {
-            if (ESP_OK != gpio_set_level(dev->ios.io_sck, (int)!(j%2)) )
-            {
-                return HX711_HW_ERR;
-            }
-            esp_rom_delay_us(1);
-        }
-        
+        gpio_set_level(dev->ios.io_sck, 1);
+        esp_rom_delay_us(1);
+        gpio_set_level(dev->ios.io_sck, 0);
+        esp_rom_delay_us(1);
     }
+
+    portEXIT_CRITICAL(&dev->mux);
 
     *value = (raw_adc_value & 0x800000) ? (int32_t)(raw_adc_value | 0xFF000000) : (int32_t)raw_adc_value;
     dev->last_raw = *value;
@@ -156,7 +143,7 @@ hx711_read_raw_with_timeout(hx711_t * dev, int32_t * value)
 
         if ( HX711_OK != hx711_is_ready(dev) )
         {
-            vTaskDelay(1);
+            esp_rom_delay_us(100);
             continue;
         }
         
@@ -166,6 +153,7 @@ hx711_read_raw_with_timeout(hx711_t * dev, int32_t * value)
 
     return HX711_TIMEOUT;
 }
+
 
 hx711_status_t
 hx711_read_raw_isr(hx711_t * dev, int32_t * value)
@@ -197,9 +185,9 @@ hx711_read_raw_isr(hx711_t * dev, int32_t * value)
     while ( (TickType_t)dev->settings.timeout_ms >= pdTICKS_TO_MS( xTaskGetTickCount() - checkpoint) )
     {
 
-        if ( true != dev->data_ready )
+        if ( !atomic_load_explicit(&dev->data_ready, memory_order_acquire) )
         {
-            vTaskDelay(1);
+            esp_rom_delay_us(100);
             continue;
         }
 

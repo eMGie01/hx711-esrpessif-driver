@@ -13,8 +13,8 @@
     } while (0)
 
 
-static void
-IRAM_ATTR hx711_isr(void * arg)
+static void IRAM_ATTR
+hx711_isr(void * arg)
 {
     atomic_bool * flag = (atomic_bool *)arg;
     atomic_store_explicit(flag, true, memory_order_release);
@@ -71,11 +71,10 @@ hx711_init(hx711_t * dev, hx711_hw_t * gpios, const hx711_set_t * settings)
     /* default config */
     dev->ios = *gpios;
     dev->settings = *settings;
-    dev->calib = (hx711_cal_t) {
-        .offset = 0,
-        .scale = 1000
-    };
     dev->last_raw = 0;
+    dev->isr_installed = false;
+    atomic_init(&dev->data_ready, false);
+    portMUX_INITIALIZE(&dev->mux);
     dev->initialized = true;
 
     return HX711_OK;
@@ -105,16 +104,20 @@ hx711_init_with_isr(hx711_t * dev, hx711_hw_t * gpios, const hx711_set_t * setti
     {
         return HX711_HW_ERR;
     }
-    
-    /* default config */
+
     dev->ios = *gpios;
     dev->settings = *settings;
-    dev->calib = (hx711_cal_t) {
-        .offset = 0,
-        .scale = 1
-    };
     dev->last_raw = 0;
+    atomic_init(&dev->data_ready, false);
+    portMUX_INITIALIZE(&dev->mux);
     dev->data_ready = false;
+
+    // we have to ensure, that the gpio_isr_serrvice is installed
+    esp_err_t res = gpio_install_isr_service(0);
+    if (ESP_OK != res && ESP_ERR_INVALID_STATE != res)
+    {
+        return HX711_ISR_ERR;
+    }
 
     if ( ESP_OK != gpio_isr_handler_add((gpio_num_t)dev->ios.io_dout, hx711_isr, (void *)&dev->data_ready) )
     {
@@ -126,7 +129,9 @@ hx711_init_with_isr(hx711_t * dev, hx711_hw_t * gpios, const hx711_set_t * setti
         return HX711_ISR_ERR;
     }
 
+    dev->isr_installed = true;
     dev->initialized = true;
+
     return HX711_OK;
 }
 
@@ -156,11 +161,10 @@ hx711_init_default(hx711_t * dev, hx711_hw_t * gpios)
         .mode = HX711_MODE_A_128,
         .timeout_ms = 50
     };
-    dev->calib = (hx711_cal_t) {
-        .offset = 0,
-        .scale = 1
-    };
     dev->last_raw = 0;
+    dev->isr_installed = false;
+    atomic_init(&dev->data_ready, false);
+    portMUX_INITIALIZE(&dev->mux);
     dev->initialized = true;
 
     return HX711_OK;
@@ -181,8 +185,17 @@ hx711_deinit(hx711_t * dev)
         return HX711_NOT_INITIALIZED;
     }
 
-    dev->settings = (hx711_set_t) {0, 0};
-    dev->calib = (hx711_cal_t) {0, 0};
+    if ( dev->isr_installed )
+    {
+        gpio_intr_disable((gpio_num_t)dev->ios.io_dout);
+        gpio_isr_handler_remove((gpio_num_t)dev->ios.io_dout);
+        dev->isr_installed = false;
+    }
+
+    dev->settings = (hx711_set_t) {
+        .mode = 0,
+        .timeout_ms = 0
+    };
     dev->last_raw = 0;
     dev->initialized = false;
 
