@@ -137,8 +137,8 @@ hx711_read_raw_with_timeout(hx711_t * dev, int32_t * value)
         return read_raw_(dev, value);
     }
 
-    uint64_t deadline_ms = esp_timer_get_time() + 1000 * (uint64_t)dev->settings.timeout_ms;
-    while ( esp_timer_get_time() - deadline_ms )
+    uint64_t deadline_us = esp_timer_get_time() + 1000ULL * (uint64_t)dev->settings.timeout_ms;
+    while ( esp_timer_get_time() < deadline_us )
     {
 
         if ( HX711_OK != hx711_is_ready(dev) )
@@ -181,7 +181,7 @@ hx711_read_raw_isr(hx711_t * dev, int32_t * value)
         }
     }
 
-    uint64_t deadline_us = esp_timer_get_time() + 1000 * (uint64_t)dev->settings.timeout_ms;
+    uint64_t deadline_us = esp_timer_get_time() + 1000ULL * (uint64_t)dev->settings.timeout_ms;
     while ( esp_timer_get_time() < deadline_us )
     {
 
