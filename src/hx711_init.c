@@ -16,8 +16,8 @@
 static void
 IRAM_ATTR hx711_isr(void * arg)
 {
-    volatile bool * flag = (bool *)arg;
-    *flag = true;
+    atomic_bool * flag = (atomic_bool *)arg;
+    atomic_store_explicit(flag, true, memory_order_release);
 }
 
     

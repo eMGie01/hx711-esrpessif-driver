@@ -1,13 +1,18 @@
-#ifndef HX711_NEW_H
-#define HX711_NEW_H
+#ifndef _HX711_H
+#define _HX711_H
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "driver/gpio.h"
+#include <stdatomic.h>
+
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+
+#include "driver/gpio.h"
+#include "freertos/portmacro.h"
 
 
 // Enums
@@ -30,6 +35,7 @@ typedef enum
     HX711_ISR_ERR,
     HX711_NOT_READY
 } hx711_status_t;
+
 
 // Structures
 typedef struct 
@@ -58,6 +64,8 @@ typedef struct
     hx711_cal_t   calib;
     int32_t       last_raw;
     bool          initialized;
+    bool          isr_installed;
+    portMUX_TYPE  mux;
 } hx711_t;
 
 
@@ -82,4 +90,4 @@ hx711_status_t hx711_get_scale_raw(const hx711_t * dev, int32_t * value);
 }
 #endif
 
-#endif /* HX711_H */
+#endif // _HX711_H
