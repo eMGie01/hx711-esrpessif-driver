@@ -73,7 +73,7 @@ hx711_status_t hx711_deinit(hx711_t * dev);
 hx711_status_t hx711_is_ready(const hx711_t * dev);
 hx711_status_t hx711_read_raw(hx711_t * dev, int32_t * value);
 hx711_status_t hx711_read_raw_with_timeout(hx711_t * dev, int32_t * value);
-hx711_status_t hx711_read_raw_isr(hx711_t * dev, int32_t * value);
+hx711_status_t hx711_read_raw_isr_wait(hx711_t * dev, int32_t * value);
 
 
 #ifdef __cplusplus
