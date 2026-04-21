@@ -187,7 +187,7 @@ hx711_read_raw_isr(hx711_t * dev, int32_t * value)
 
         if ( !atomic_load_explicit(&dev->data_ready, memory_order_acquire) )
         {
-            esp_rom_delay_us(100);
+            vTaskDelay(1);
             continue;
         }
 

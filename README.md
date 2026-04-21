@@ -1,6 +1,6 @@
 # README — HX711 ESP-IDF Driver (minimal)
 
-A minimal, low-level HX711 driver for ESP-IDF focused on reliable raw ADC readout with optional ISR-based 'data ready' signaling.  
+A minimal HX711 driver for ESP-IDF focused on reliable raw ADC readout with optional interrupt-assisted 'data ready' signaling.  
 The driver intentionally avoids application-level concepts such as scaling, units, tare, filtering, or averaging.
 
 ## Key characteristics
@@ -12,7 +12,7 @@ The driver intentionally avoids application-level concepts such as scaling, unit
   - **ISR-assisted read** (`hx711_init_with_isr` + `hx711_read_raw_isr`)
 - Bit-banged readout is protected by a **critical section** to avoid corrupted reads due to interrupts/context switches.
 - Uses **C11 atomics** for safe ISR → main code synchronization.
-- Uses `esp_timer_get_time()` for timeouts (microseconds resolution).
+- Uses `esp_timer_get_time()` for timeout deadlines (microseconds resolution).
 
 ## Files
 
@@ -24,12 +24,14 @@ The driver intentionally avoids application-level concepts such as scaling, unit
 
 - ESP-IDF with GPIO driver support (`driver/gpio.h`)
 - `esp_timer` available (for timeout reads)
+- FreeRTOS task API available (`vTaskDelay` is used by the ISR-assisted wait path)
 - C11 atomics (`<stdatomic.h>`)
 
 Notes:
 
-- The driver does not rely on FreeRTOS tasks/ticks for timeouts.  
-- A small dependency on `freertos/portmacro.h` remains for `portMUX_TYPE` / critical sections, for interrupt-safe bit-banging.
+- `hx711_read_raw_with_timeout()` remains independent from FreeRTOS task scheduling.
+- `hx711_read_raw_isr()` is intended for **task context only** and uses `vTaskDelay()` while waiting for the ISR readiness flag.
+- A small dependency on FreeRTOS remains for `portMUX_TYPE` / critical sections and the task-delay based wait path.
 
 ## Public API (Overview)
 
@@ -79,7 +81,7 @@ Timeout measurement is done using `esp_timer_get_time()` (microseconds - `us`).
 
 Use this when you already have a main loop and want full control over scheduling.
 
-### 2. Timeout-based blocking read (no FreeRTOS tick dependency)
+### 2. Timeout-based blocking read (no FreeRTOS task dependency)
 
 Call `hx711_read_raw_with_timeout()` and let the driver wait until:
 
@@ -89,9 +91,9 @@ Call `hx711_read_raw_with_timeout()` and let the driver wait until:
 ### 3. ISR-assisted read
 
 Use `hx711_init_with_isr()` to configure a negative-edge interrupt on `io_dout`.  
-Then call `hx711_read_raw_isr()`, which waits for the ISR flag (with a timeout) and performs a protected read.
+Then call `hx711_read_raw_isr()`, which waits for the ISR-updated readiness flag, yields the calling task while waiting, and performs a protected read once data is ready.
 
-This mode is useful when you want to avoid continuous polling of `DOUT`.
+This mode is useful when you want to avoid continuous busy-polling of `DOUT`, but it must be called from a FreeRTOS task rather than from an ISR.
 
 ## Design notes / scope
 
@@ -108,4 +110,4 @@ All functions return `hx711_status_t`. Typical error reasons:
 - not initialized
 - GPIO configuration failures
 - timeout while waiting for data ready
-- ISR setup failures (when using ISR mode)
+- ISR setup failures (when using ISR-assisted mode)
