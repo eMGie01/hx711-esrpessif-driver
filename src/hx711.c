@@ -10,16 +10,19 @@
  */
 
 #include "hx711.h"
-#include "driver/gpio.h"
+#include "esp_rom_sys.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
-#define HX711_MODE_MIN HX711_MODE_A128
-#define HX711_MODE_MAX HX711_MODE_A64
+#define HX711_MODE_DEFAULT 	HX711_MODE_A128
+#define HX711_MODE_MIN 		HX711_MODE_A128
+#define HX711_MODE_MAX 		HX711_MODE_A64
 
 #define HX711_CHECK_MODE_MIN(mode)      ((mode) >= HX711_MODE_MIN)
 #define HX711_CHECK_MODE_MAX(mode)      ((mode) <= HX711_MODE_MAX)
 #define HX711_MODE_IS_VALID_MODE(mode)  (HX711_CHECK_MODE_MIN((mode)) && HX711_CHECK_MODE_MAX((mode)))
 
-#define HX711_READY(dev) (!gpio_get_level((dev->ioDout)))
+#define HX711_READY(dev) (!gpio_get_level(((dev)->ioDout)))
 
 #define ADC_BIT_COUNT 24
 
@@ -38,7 +41,7 @@ hx711_Open(hx711_HandleTypeDef dev, gpio_num_t ioSck, gpio_num_t ioDout, uint8_t
 {
     if (dev == NULL)
     {
-        return HX711_ERR_NOVAL;
+        return HX711_ERR_NODEV;
     }
 
     if (!GPIO_IS_VALID_GPIO(ioDout) || !GPIO_IS_VALID_OUTPUT_GPIO(ioSck))
@@ -65,23 +68,6 @@ hx711_Open(hx711_HandleTypeDef dev, gpio_num_t ioSck, gpio_num_t ioDout, uint8_t
         .intr_type = (enableIsr) ? GPIO_INTR_NEGEDGE : GPIO_INTR_DISABLE,
     };
 
-    if (gpio_config(&ioSckConfig) != ESP_OK || gpio_config(&ioDoutConfig)!= ESP_OK)
-    {
-        return HX711_ERR_HW;
-    }
-
-    if (enableIsr)
-    {
-        if (gpio_isr_handler_add(ioDout, hx711_Isr_, dev) != ESP_OK || gpio_intr_disable(ioDout) != ESP_OK)
-        {
-            return HX711_ERR_ISR;
-        }
-    }
-
-    gpio_set_level(ioSck, 1);
-    esp_rom_delay_us(100);
-    gpio_set_level(ioSck, 0);
-
     dev->ioSck = ioSck;
     dev->ioDout = ioDout;
     dev->mode = mode;
@@ -90,6 +76,25 @@ hx711_Open(hx711_HandleTypeDef dev, gpio_num_t ioSck, gpio_num_t ioDout, uint8_t
     dev->callbackArg = arg;
 	dev->mux = (portMUX_TYPE)portMUX_INITIALIZER_UNLOCKED;
 
+    if (gpio_config(&ioSckConfig) != ESP_OK || gpio_config(&ioDoutConfig)!= ESP_OK)
+    {
+		hx711_Close(dev);
+        return HX711_ERR_HW;
+    }
+	
+    gpio_set_level(ioSck, 1);
+    esp_rom_delay_us(100);
+    gpio_set_level(ioSck, 0);
+
+    if (enableIsr)
+    {
+        if (gpio_isr_handler_add(ioDout, hx711_ISR_, dev) != ESP_OK || gpio_intr_disable(ioDout) != ESP_OK)
+        {
+			hx711_Close(dev);
+            return HX711_ERR_ISR;
+        }
+    }
+	
     return HX711_ERR_OK;
 }
 
@@ -107,17 +112,25 @@ hx711_Close(hx711_HandleTypeDef dev)
     {
         if (gpio_intr_disable(dev->ioDout) != ESP_OK || gpio_isr_handler_remove(dev->ioDout) != ESP_OK)
         {
-            res = HX711_ERR_ISR;
+			if (res == HX711_ERR_OK)
+			{
+				res = HX711_ERR_ISR;
+			}
         }
     }
 
     if (gpio_reset_pin(dev->ioSck) != ESP_OK || gpio_reset_pin(dev->ioDout) != ESP_OK)
     {
-        res = HX711_ERR_HW;
+		if (res == HX711_ERR_OK)
+		{
+			res = HX711_ERR_HW;
+		}
     }
 
     dev->ioSck = GPIO_NUM_NC;
     dev->ioDout = GPIO_NUM_NC;
+	dev->timeoutMs = 0UL;
+	dev->mode = HX711_MODE_DEFAULT;
     dev->callback = NULL;
     dev->callbackArg = NULL;
 
@@ -167,7 +180,7 @@ hx711_Read(hx711_HandleTypeDef dev, int32_t* code)
     {
         if (gpio_set_level(dev->ioSck, 0) != ESP_OK)
         {
-            return HX711_ERR;
+            return HX711_ERR_HW;
         }
     }
 	

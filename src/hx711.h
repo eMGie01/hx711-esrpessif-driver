@@ -12,9 +12,11 @@
 #ifndef HX711_H
 #define HX711_H
 
+#include "driver/gpio.h"
+#include "freertos/portmacro.h"
+
 #include <stdint.h>
 #include <stdbool.h>
-// #include <stdatomic.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -34,7 +36,7 @@ extern "C" {
 
 typedef void (*hx711_CallbackTypeDef)(void* arg);
 
-typedef struct hx711_StatusTypeDef
+typedef enum hx711_StatusTypeDef
 {
     HX711_ERR_OK = 0,
     HX711_ERR_NODEV = -1,
@@ -46,7 +48,7 @@ typedef struct hx711_StatusTypeDef
 
 } hx711_StatusTypeDef;
 
-typedef struct hx711_IoctlTypeDef 
+typedef enum hx711_IoctlTypeDef 
 {
 	// HX711_IOCTL_
 	HX711_IOCTL_SET_TIMEOUT = 1,
@@ -70,7 +72,7 @@ typedef struct hx711_TypeDef
 
 typedef hx711_TypeDef* hx711_HandleTypeDef;
 
-hx711_StatusTypeDef hx711_Open(hx711_HandleTypeDef dev, uint8_t ioSck, uint8_t ioDout, uint8_t mode, uint32_t timeoutMs, hx711_CallbackTypeDef callback, void* arg);
+hx711_StatusTypeDef hx711_Open(hx711_HandleTypeDef dev, gpio_num_t ioSck, gpio_num_t ioDout, uint8_t mode, uint32_t timeoutMs, hx711_CallbackTypeDef callback, void* arg);
 hx711_StatusTypeDef hx711_Close(hx711_HandleTypeDef dev);
 hx711_StatusTypeDef hx711_Read(hx711_HandleTypeDef dev, int32_t* code);
 hx711_StatusTypeDef hx711_Ioctl(hx711_HandleTypeDef dev, hx711_IoctlTypeDef request, void* arg);
