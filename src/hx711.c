@@ -1,5 +1,5 @@
 /**
- * @file hx711_init.c
+ * @file hx711.c
  * @author Marek Galeczka (marek.galeczka@outlook.com)
  * @brief 
  * @version 0.2
