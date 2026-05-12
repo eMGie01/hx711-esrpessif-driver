@@ -1,80 +1,68 @@
+/**
+ * @file hx711.h
+ * @author Marek Galeczka (marek.galeczka@outlook.com)
+ * @brief 
+ * @version 0.2
+ * @date 2026-05-12
+ * 
+ * @copyright Copyright (c) 2026
+ * 
+ */
+
 #ifndef HX711_H
 #define HX711_H
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <stdatomic.h>
-
+// #include <stdatomic.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+/**
+ * What do i want from this driver?
+ * 1. I want it to be written in modern embedded style (open, close, read, write, ioctl) with handles and typedefs,
+ * 2. I want it to have capabilities of notifying task by event group beats in IST use
+ * 3. I want all of the functions, structures and enums to be written in: header_PascalCase
+ *      - ex. hx711_StatusTypeDef
+ */
 
-#include "driver/gpio.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/portmacro.h"
+#define HX711_MODE_A128 25
+#define HX711_MODE_B32  26
+#define HX711_MODE_A64  27
 
+typedef void (*hx711_CallbackTypeDef)(void* arg);
 
-// Enums
-typedef enum {
-    HX711_MODE_MIN   = 25,
-    HX711_MODE_A_128 = 25,
-    HX711_MODE_B_32  = 26,
-    HX711_MODE_A_64  = 27,
-    HX711_MODE_MAX   = 27
-} hx711_mode_t;
-
-typedef enum
+typedef struct hx711_StatusTypeDef
 {
-    HX711_UNEXPECTED_ERR = -1,
-    HX711_OK = 0,
-    HX711_INVALID_ARG,
-    HX711_NOT_INITIALIZED,
-    HX711_TIMEOUT,
-    HX711_HW_ERR,
-    HX711_ISR_ERR,
-    HX711_NOT_READY
-} hx711_status_t;
+    HX711_ERR_OK = 0,
+    HX711_ERR_NODEV = -1,
+    HX711_ERR_INVAL = -2,
+    HX711_ERR_HW = -3,
+    HX711_ERR_ISR = -4,
 
+} hx711_StatusTypeDef;
 
-// Structures
-typedef struct 
+typedef struct hx711_TypeDef 
 {
-    int io_sck;
-    int io_dout;
-} hx711_hw_t;
+    gpio_num_t ioSck;
+    gpio_num_t ioDout;
+    uint8_t mode;
+    uint32_t timeoutMs;             // used for polling
+    hx711_CallbackTypeDef callback; // NULL == polling mode
+    void* callbackArg;
 
-typedef struct
-{
-    hx711_mode_t mode;
-    uint32_t     timeout_ms;
-} hx711_set_t;
+} hx711_TypeDef;
 
-typedef struct 
-{
-    atomic_bool data_ready;
-    hx711_hw_t    ios;
-    hx711_set_t   settings;
-    int32_t       last_raw;
-    bool          initialized;
-    bool          isr_installed;
-    portMUX_TYPE  mux;
-} hx711_t;
+typedef hx711_TypeDef* hx711_HandleTypeDef;
 
+hx711_StatusTypeDef hx711_Open(hx711_HandleTypeDef dev, uint8_t ioSck, uint8_t ioDout, uint8_t mode, uint32_t timeoutMs, hx711_CallbackTypeDef callback, void* arg);
+hx711_StatusTypeDef hx711_Close(hx711_HandleTypeDef dev);
 
-// Functions
-hx711_status_t hx711_init(hx711_t * dev, hx711_hw_t * gpios, const hx711_set_t * settings);
-hx711_status_t hx711_init_with_isr(hx711_t * dev, hx711_hw_t * gpios, const hx711_set_t * settings);
-hx711_status_t hx711_init_default(hx711_t * dev, hx711_hw_t * gpios);
-hx711_status_t hx711_deinit(hx711_t * dev);
-
-hx711_status_t hx711_is_ready(const hx711_t * dev);
-hx711_status_t hx711_read_raw(hx711_t * dev, int32_t * value);
-hx711_status_t hx711_read_raw_with_timeout(hx711_t * dev, int32_t * value);
-hx711_status_t hx711_read_raw_isr_wait(hx711_t * dev, int32_t * value);
-
+hx711_StatusTypeDef hx711_Read();
+hx711_StatusTypeDef hx711_Write();
+hx711_StatusTypeDef hx711_Ioctl();
 
 #ifdef __cplusplus
 }

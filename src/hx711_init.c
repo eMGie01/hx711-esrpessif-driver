@@ -1,219 +1,152 @@
+/**
+ * @file hx711_init.c
+ * @author Marek Galeczka (marek.galeczka@outlook.com)
+ * @brief 
+ * @version 0.2
+ * @date 2026-05-12
+ * 
+ * @copyright Copyright (c) 2026
+ * 
+ */
+
 #include "hx711.h"
+#include "driver/gpio.h"
 
-#include "esp_rom_sys.h"
-#include "esp_err.h"
-#include "esp_log.h"
+#define HX711_MODE_MIN HX711_MODE_A128
+#define HX711_MODE_MAX HX711_MODE_A64
 
-
-#define RETURN_HW_IF_ESPERR(cb) \
-    do {                        \
-        esp_err_t e_ = (cb);    \
-        if ( (e_) != ESP_OK )   \
-            return HX711_HW_ERR;\
-    } while (0)
-
+#define HX711_CHECK_MODE_MIN(mode)      ((mode) >= HX711_MODE_MIN)
+#define HX711_CHECK_MODE_MAX(mode)      ((mode) <= HX711_MODE_MAX)
+#define HX711_MODE_IS_VALID_MODE(mode)  (HX711_CHECK_MODE_MIN((mode)) && HX711_CHECK_MODE_MAX((mode)))
 
 static void IRAM_ATTR
-hx711_isr(void * arg)
+hx711_ISR_(void* arg)
 {
-    atomic_bool * flag = (atomic_bool *)arg;
-    atomic_store_explicit(flag, true, memory_order_release);
+    hx711_HandleTypeDef dev = (hx711_HandleTypeDef)arg;
+    if (dev->callback)
+    {
+        dev->callback(dev->callbackArg);
+    }
 }
 
-    
-static hx711_status_t
-hx711_cfg_ios(hx711_hw_t * gpios)
+hx711_StatusTypeDef 
+hx711_Open(hx711_HandleTypeDef dev, gpio_num_t ioSck, gpio_num_t ioDout, uint8_t mode, uint32_t timeoutMs, hx711_CallbackTypeDef callback, void* arg)
 {
-    RETURN_HW_IF_ESPERR(
-        gpio_config(&(gpio_config_t) {
-        .pin_bit_mask = (1ULL << gpios->io_dout),
-        .mode = GPIO_MODE_INPUT
-    }));
+    if (dev == NULL)
+    {
+        return HX711_ERR_NOVAL;
+    }
 
-    RETURN_HW_IF_ESPERR(
-        gpio_config(&(gpio_config_t){
-        .pin_bit_mask = (1ULL << gpios->io_sck),
+    if (!GPIO_IS_VALID_GPIO(ioDout) || !GPIO_IS_VALID_OUTPUT_GPIO(ioSck))
+    {
+        return HX711_ERR_HW;
+    }
+
+    if (!HX711_MODE_IS_VALID_MODE(mode))
+    {
+        return HX711_ERR_INVAL;
+    }
+
+    bool enableIsr = (callback != NULL);
+
+    gpio_config_t ioSckConfig = {
+        .pin_bit_mask = (1ULL << (gpio_num_t)ioSck),
         .mode = GPIO_MODE_OUTPUT,
-        .pull_down_en = GPIO_PULLDOWN_ENABLE
-    }));
-
-    RETURN_HW_IF_ESPERR(
-        gpio_set_level(gpios->io_sck, 0));
-
-    return HX711_OK;
-}
-
-
-hx711_status_t
-hx711_init(hx711_t * dev, hx711_hw_t * gpios, const hx711_set_t * settings)
-{
-
-    if ( !dev || !gpios || !settings )
-    {
-        return HX711_INVALID_ARG;
-    }
-
-    if ( !GPIO_IS_VALID_GPIO(gpios->io_dout) || !GPIO_IS_VALID_OUTPUT_GPIO(gpios->io_sck) )
-    {
-        return HX711_HW_ERR;
-    }
-
-    if ( HX711_MODE_MIN > settings->mode || HX711_MODE_MAX < settings->mode )
-    {
-        return HX711_INVALID_ARG;
-    }
-
-    if ( hx711_cfg_ios(gpios) != HX711_OK )
-    {
-        return HX711_HW_ERR;
-    }
-    
-    /* default config */
-    dev->ios = *gpios;
-    dev->settings = *settings;
-    dev->last_raw = 0;
-    dev->isr_installed = false;
-    atomic_init(&dev->data_ready, false);
-    dev->mux = (portMUX_TYPE)portMUX_INITIALIZER_UNLOCKED;
-    dev->initialized = true;
-
-    return HX711_OK;
-}
-
-
-hx711_status_t
-hx711_init_with_isr(hx711_t * dev, hx711_hw_t * gpios, const hx711_set_t * settings)
-{
-
-    if ( !dev || !gpios || !settings )
-    {
-        return HX711_INVALID_ARG;
-    }
-
-    if ( !GPIO_IS_VALID_GPIO(gpios->io_dout) || !GPIO_IS_VALID_OUTPUT_GPIO(gpios->io_sck) )
-    {
-        return HX711_HW_ERR;
-    }
-
-    if ( HX711_MODE_MIN > settings->mode || HX711_MODE_MAX < settings->mode )
-    {
-        return HX711_INVALID_ARG;
-    }
-
-    if ( hx711_cfg_ios(gpios) != HX711_OK )
-    {
-        return HX711_HW_ERR;
-    }
-
-    dev->ios = *gpios;
-    dev->settings = *settings;
-    dev->last_raw = 0;
-    atomic_init(&dev->data_ready, false);
-    dev->mux = (portMUX_TYPE)portMUX_INITIALIZER_UNLOCKED;
-
-    // we have to ensure, that the gpio_isr_serrvice is installed
-    esp_err_t res = gpio_install_isr_service(0);
-    if (ESP_OK != res && ESP_ERR_INVALID_STATE != res)
-    {
-        return HX711_ISR_ERR;
-    }
-
-    if ( ESP_OK != gpio_isr_handler_add((gpio_num_t)dev->ios.io_dout, hx711_isr, (void *)&dev->data_ready) )
-    {
-        return HX711_ISR_ERR;
-    }
-    
-    if ( ESP_OK != gpio_set_intr_type((gpio_num_t)dev->ios.io_dout, GPIO_INTR_NEGEDGE) )
-    {
-        gpio_isr_handler_remove((gpio_num_t)dev->ios.io_dout);
-        return HX711_ISR_ERR;
-    }
-
-    if ( ESP_OK != gpio_intr_enable((gpio_num_t)dev->ios.io_dout) )
-    {
-        gpio_isr_handler_remove((gpio_num_t)dev->ios.io_dout);
-        return HX711_ISR_ERR;
-    }
-
-    dev->isr_installed = true;
-    dev->initialized = true;
-
-    return HX711_OK;
-}
-
-
-hx711_status_t 
-hx711_init_default(hx711_t * dev, hx711_hw_t * gpios)
-{
-
-    if (!dev || !gpios)
-    {
-        return HX711_INVALID_ARG;
-    }
-
-    if ( !GPIO_IS_VALID_GPIO(gpios->io_dout) || !GPIO_IS_VALID_OUTPUT_GPIO(gpios->io_sck) )
-    {
-        return HX711_HW_ERR;
-    }
-
-    if ( hx711_cfg_ios(gpios) != HX711_OK )
-    {
-        return HX711_HW_ERR;
-    }
-
-    /* default config */
-    dev->ios = *gpios;
-    dev->settings = (hx711_set_t) {
-        .mode = HX711_MODE_A_128,
-        .timeout_ms = 50
+        .pull_down_en = GPIO_PULLDOWN_ENABLE,
     };
-    dev->last_raw = 0;
-    dev->isr_installed = false;
-    atomic_init(&dev->data_ready, false);
-    dev->mux = (portMUX_TYPE)portMUX_INITIALIZER_UNLOCKED;
-    dev->initialized = true;
 
-    return HX711_OK;
+    gpio_config_t ioDoutConfig = {
+        .pin_bit_mask = (1ULL << (gpio_num_t)ioDout),
+        .mode = GPIO_MODE_INPUT,
+        .intr_type = (enableIsr) ? GPIO_INTR_NEGEDGE : GPIO_INTR_DISABLE,
+    };
+
+    if (gpio_config(&ioSckConfig) != ESP_OK || gpio_config(&ioDoutConfig)!= ESP_OK)
+    {
+        return HX711_ERR_HW;
+    }
+
+    if (enableIsr)
+    {
+        if (gpio_isr_handler_add(ioDout, hx711_Isr_, dev) != ESP_OK || gpio_intr_disable(ioDout) != ESP_OK)
+        {
+            return HX711_ERR_ISR;
+        }
+    }
+
+    gpio_set_level(ioSck, 1);
+    esp_rom_delay_us(100);
+    gpio_set_level(ioSck, 0);
+
+    dev->ioSck = ioSck;
+    dev->ioDout = ioDout;
+    dev->mode = mode;
+    dev->timeoutMs = timeoutMs;
+    dev->callback = callback;
+    dev->callbackArg = arg;
+
+    return HX711_ERR_OK;
 }
 
-
-hx711_status_t
-hx711_deinit(hx711_t * dev)
+hx711_StatusTypeDef
+hx711_Close(hx711_HandleTypeDef dev)
 {
-
-    if ( !dev )
+    if (dev == NULL)
     {
-        return HX711_INVALID_ARG;
+        return HX711_ERR_INVAL;
     }
 
-    if ( !dev->initialized )
+    hx711_StatusTypeDef res = HX711_ERR_OK;
+
+    if (dev->callback != NULL)
     {
-        return HX711_NOT_INITIALIZED;
+        if (gpio_intr_disable(dev->ioDout) != ESP_OK || gpio_isr_handler_remove(dev->ioDout) != ESP_OK)
+        {
+            res = HX711_ERR_ISR;
+        }
     }
 
-    if ( dev->isr_installed )
+    if (gpio_reset_pin(dev->ioSck) != ESP_OK || gpio_reset_pin(dev->ioDout) != ESP_OK)
     {
-        gpio_intr_disable((gpio_num_t)dev->ios.io_dout);
-        gpio_isr_handler_remove((gpio_num_t)dev->ios.io_dout);
-        dev->isr_installed = false;
+        res = HX711_ERR_HW;
     }
 
-    dev->settings = (hx711_set_t) {0, 0};
-    dev->last_raw = 0;
-    dev->initialized = false;
+    dev->ioSck = GPIO_NUM_NC;
+    dev->ioDout = GPIO_NUM_NC;
+    dev->callback = NULL;
+    dev->callbackArg = NULL;
 
-    if ( gpio_reset_pin(dev->ios.io_sck) != ESP_OK )
-    {
-        return HX711_HW_ERR;
-    }
-    
-    if ( gpio_reset_pin(dev->ios.io_dout) != ESP_OK )
-    {
-        return HX711_HW_ERR;
-    }
-
-    dev->ios = (hx711_hw_t) {0, 0};
-
-    return HX711_OK;
+    return res;
 }
 
+hx711_StatusTypeDef
+hx711_Read(hx711_HandleTypeDef dev, int32_t* code)
+{
+    if (dev == NULL)
+    {
+        return HX711_ERR_NODEV;
+    }
+    if (code == NULL)
+    {
+        return HX711_ERR_INVAL;
+    }
+
+    if (gpio_get_level(dev->ioSck) != 0)
+    {
+        if (gpio_set_level(dev->ioSck, 0) != ESP_OK)
+        {
+            return HX711_HW_ERR;
+        }
+    }
+
+    if (dev->callback != NULL)
+    {
+
+    }
+    else
+    {
+
+    }
+
+    return HX711_ERR_OK;
+}
