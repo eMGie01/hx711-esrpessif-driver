@@ -41,8 +41,20 @@ typedef struct hx711_StatusTypeDef
     HX711_ERR_INVAL = -2,
     HX711_ERR_HW = -3,
     HX711_ERR_ISR = -4,
+	HX711_ERR_TIMEOUT = -5,
+	HX711_ERR_NOT_RDY = -6,
 
 } hx711_StatusTypeDef;
+
+typedef struct hx711_IoctlTypeDef 
+{
+	// HX711_IOCTL_
+	HX711_IOCTL_SET_TIMEOUT = 1,
+	HX711_IOCTL_GET_TIMEOUT = 2,
+	HX711_IOCTL_SET_MODE = 3,
+	HX711_IOCTL_GET_MODE = 4,
+	
+} hx711_IoctlTypeDef;
 
 typedef struct hx711_TypeDef 
 {
@@ -52,6 +64,7 @@ typedef struct hx711_TypeDef
     uint32_t timeoutMs;             // used for polling
     hx711_CallbackTypeDef callback; // NULL == polling mode
     void* callbackArg;
+	portMUX_TYPE mux;
 
 } hx711_TypeDef;
 
@@ -59,10 +72,8 @@ typedef hx711_TypeDef* hx711_HandleTypeDef;
 
 hx711_StatusTypeDef hx711_Open(hx711_HandleTypeDef dev, uint8_t ioSck, uint8_t ioDout, uint8_t mode, uint32_t timeoutMs, hx711_CallbackTypeDef callback, void* arg);
 hx711_StatusTypeDef hx711_Close(hx711_HandleTypeDef dev);
-
-hx711_StatusTypeDef hx711_Read();
-hx711_StatusTypeDef hx711_Write();
-hx711_StatusTypeDef hx711_Ioctl();
+hx711_StatusTypeDef hx711_Read(hx711_HandleTypeDef dev, int32_t* code);
+hx711_StatusTypeDef hx711_Ioctl(hx711_HandleTypeDef dev, hx711_IoctlTypeDef request, void* arg);
 
 #ifdef __cplusplus
 }

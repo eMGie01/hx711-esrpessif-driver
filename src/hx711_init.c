@@ -19,6 +19,10 @@
 #define HX711_CHECK_MODE_MAX(mode)      ((mode) <= HX711_MODE_MAX)
 #define HX711_MODE_IS_VALID_MODE(mode)  (HX711_CHECK_MODE_MIN((mode)) && HX711_CHECK_MODE_MAX((mode)))
 
+#define HX711_READY(dev) (!gpio_get_level((dev->ioDout)))
+
+#define ADC_BIT_COUNT 24
+
 static void IRAM_ATTR
 hx711_ISR_(void* arg)
 {
@@ -84,6 +88,7 @@ hx711_Open(hx711_HandleTypeDef dev, gpio_num_t ioSck, gpio_num_t ioDout, uint8_t
     dev->timeoutMs = timeoutMs;
     dev->callback = callback;
     dev->callbackArg = arg;
+	dev->mux = (portMUX_TYPE)portMUX_INITIALIZER_UNLOCKED;
 
     return HX711_ERR_OK;
 }
@@ -119,6 +124,33 @@ hx711_Close(hx711_HandleTypeDef dev)
     return res;
 }
 
+static int32_t
+hx711_ReadFromDevice_(hx711_HandleTypeDef dev)
+{
+	uint32_t rawCode = 0;
+	portENTER_CRITICAL(&dev->mux);
+	
+    for (uint8_t i = 0; i < ADC_BIT_COUNT; ++i)
+    {
+        gpio_set_level(dev->ioSck, 1);
+        esp_rom_delay_us(1);
+        rawCode = (rawCode << 1) | gpio_get_level(dev->ioDout);
+        gpio_set_level(dev->ioSck, 0);
+        esp_rom_delay_us(1);
+    }
+	
+    for (uint8_t i = 0; i < ((uint8_t)dev->mode - ADC_BIT_COUNT); ++i)
+    {
+        gpio_set_level(dev->ioSck, 1);
+        esp_rom_delay_us(1);
+        gpio_set_level(dev->ioSck, 0);
+        esp_rom_delay_us(1);
+    }
+	
+	portEXIT_CRITICAL(&dev->mux);
+    return (rawCode & 0x800000) ? (int32_t)(rawCode | 0xFF000000) : (int32_t)rawCode;
+}
+
 hx711_StatusTypeDef
 hx711_Read(hx711_HandleTypeDef dev, int32_t* code)
 {
@@ -135,18 +167,141 @@ hx711_Read(hx711_HandleTypeDef dev, int32_t* code)
     {
         if (gpio_set_level(dev->ioSck, 0) != ESP_OK)
         {
-            return HX711_HW_ERR;
+            return HX711_ERR;
         }
     }
+	
+	if (dev->callback != NULL)
+	{
+		if (!HX711_READY(dev))
+		{
+			return HX711_ERR_NOT_RDY;
+		}
+		
+		gpio_intr_disable(dev->ioDout);
+		*code = hx711_ReadFromDevice_(dev);
+		gpio_intr_enable(dev->ioDout);
+		return HX711_ERR_OK;
+	}
+	else
+	{
+		if ( dev->timeoutMs == 0 )
+		{
+			if (!HX711_READY(dev))
+			{
+				return HX711_ERR_NOT_RDY;
+			}
+			
+			*code = hx711_ReadFromDevice_(dev);
+			return HX711_ERR_OK;
+		}
 
-    if (dev->callback != NULL)
+		uint64_t deadlineUs = esp_timer_get_time() + 1000ULL * (uint64_t)dev->timeoutMs;
+		while ( esp_timer_get_time() < deadlineUs )
+		{
+			if (!HX711_READY(dev))
+			{
+				vTaskDelay(1);
+				continue;
+			}
+			
+			*code = hx711_ReadFromDevice_(dev);
+			return HX711_ERR_OK;
+		}
+	}
+	
+    return HX711_ERR_TIMEOUT;
+}
+
+static hx711_StatusTypeDef
+hx711_SetTimeout_(hx711_HandleTypeDef dev, uint32_t* timeoutMs)
+{
+	if (timeoutMs == NULL)
+	{
+		return HX711_ERR_INVAL;
+	}
+	
+	dev->timeoutMs = *timeoutMs;
+	return HX711_ERR_OK;
+}
+
+static hx711_StatusTypeDef
+hx711_GetTimeout_(hx711_HandleTypeDef dev, uint32_t* timeoutMs)
+{
+	if (timeoutMs == NULL)
+	{
+		return HX711_ERR_INVAL;
+	}
+	
+	*timeoutMs = dev->timeoutMs;
+	return HX711_ERR_OK;
+}
+
+static hx711_StatusTypeDef
+hx711_SetMode_(hx711_HandleTypeDef dev, uint8_t* mode)
+{
+	if (mode == NULL)
+	{
+		return HX711_ERR_INVAL;
+	}
+    if (!HX711_MODE_IS_VALID_MODE(*mode))
     {
-
+        return HX711_ERR_INVAL;
     }
-    else
-    {
+	
+	dev->mode = *mode;
+	return HX711_ERR_OK;
+}
 
-    }
+static hx711_StatusTypeDef
+hx711_GetMode_(hx711_HandleTypeDef dev, uint8_t* mode)
+{
+	if (mode == NULL)
+	{
+		return HX711_ERR_INVAL;
+	}
+	
+	*mode = dev->mode;
+	return HX711_ERR_OK;
+}
 
-    return HX711_ERR_OK;
+hx711_StatusTypeDef
+hx711_Ioctl(hx711_HandleTypeDef dev, hx711_IoctlTypeDef request, void* arg)
+{
+	if (dev == NULL)
+	{
+		return HX711_ERR_NODEV;
+	}
+	
+	hx711_StatusTypeDef status;
+	
+	switch(request)
+	{
+	case HX711_IOCTL_SET_TIMEOUT:
+	{
+		status = hx711_SetTimeout_(dev, (uint32_t*)arg);
+		break;
+	}
+	case HX711_IOCTL_GET_TIMEOUT:
+	{
+		status = hx711_GetTimeout_(dev, (uint32_t*)arg);
+		break;
+	}
+	case HX711_IOCTL_SET_MODE:
+	{
+		status = hx711_SetMode_(dev, (uint8_t*)arg);
+		break;
+	}
+	case HX711_IOCTL_GET_MODE:
+	{
+		status = hx711_GetMode_(dev, (uint8_t*)arg);
+		break;
+	}
+	default:
+	{
+		status = HX711_ERR_INVAL;
+	}
+	}
+	
+	return status;
 }
